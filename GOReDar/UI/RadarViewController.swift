@@ -2,17 +2,22 @@ import UIKit
 import WebKit
 
 /// 内置雷达：全屏 WebView 打开 666 前端的分享页，左上角悬浮返回，方向跟随手机。
+/// 对齐安卓 RadarActivity：沉浸式全屏（隐藏状态栏与 Home 指示条）、内容铺满整屏。
 final class RadarViewController: UIViewController {
 
     static private(set) var isPresented = false
 
+    private static let background = UIColor(red: 11 / 255, green: 18 / 255, blue: 32 / 255, alpha: 1)
+    private static let buttonSize: CGFloat = 44
+
     private let urlString: String
     private var web: WKWebView!
-    private let backButton = UILabel()
+    private let backButton = UIButton(type: .system)
 
     init(urlString: String) {
         self.urlString = urlString
         super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .fullScreen
     }
 
     @available(*, unavailable)
@@ -25,39 +30,30 @@ final class RadarViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         RadarViewController.isPresented = true
-        view.backgroundColor = UIColor(red: 11 / 255, green: 18 / 255, blue: 32 / 255, alpha: 1)
+        view.backgroundColor = RadarViewController.background
 
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
+        config.defaultWebpagePreferences.allowsContentJavaScript = true
+
         web = WKWebView(frame: view.bounds, configuration: config)
         web.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        web.backgroundColor = view.backgroundColor
+        web.backgroundColor = RadarViewController.background
         web.isOpaque = false
-        web.scrollView.backgroundColor = view.backgroundColor
+        web.scrollView.backgroundColor = RadarViewController.background
+        // 安卓是 immersive 全屏，这里是关键差异：默认 .automatic 会按安全区给网页留黑边，
+        // 导致雷达页上下出现条带、看起来没铺满。改成 .never 让内容真正顶到屏幕边缘。
+        web.scrollView.contentInsetAdjustmentBehavior = .never
+        web.scrollView.bounces = false
+        web.scrollView.contentInset = .zero
+        web.scrollView.scrollIndicatorInsets = .zero
         web.navigationDelegate = self
+        // 安卓硬件返回键在可回退时走网页历史，iOS 用左缘滑动等价实现。
+        web.allowsBackForwardNavigationGestures = true
         view.addSubview(web)
 
-        backButton.text = "‹"
-        backButton.textAlignment = .center
-        backButton.font = UIFont.systemFont(ofSize: 26, weight: .semibold)
-        backButton.textColor = UIColor(red: 15 / 255, green: 23 / 255, blue: 42 / 255, alpha: 1)
-        backButton.backgroundColor = .white
-        backButton.layer.cornerRadius = 22
-        backButton.layer.shadowColor = UIColor.black.cgColor
-        backButton.layer.shadowOpacity = 0.25
-        backButton.layer.shadowRadius = 8
-        backButton.layer.shadowOffset = CGSize(width: 0, height: 3)
-        backButton.isUserInteractionEnabled = true
-        backButton.translatesAutoresizingMaskIntoConstraints = false
-        backButton.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(goBack)))
-        view.addSubview(backButton)
-        NSLayoutConstraint.activate([
-            backButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
-            backButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
-            backButton.widthAnchor.constraint(equalToConstant: 44),
-            backButton.heightAnchor.constraint(equalToConstant: 44),
-        ])
+        setupBackButton()
 
         guard let url = URL(string: urlString) else {
             showErrorPage()
@@ -70,6 +66,7 @@ final class RadarViewController: UIViewController {
         super.viewDidAppear(animated)
         setNeedsStatusBarAppearanceUpdate()
         setNeedsUpdateOfHomeIndicatorAutoHidden()
+        updateSupportedOrientations()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -77,11 +74,43 @@ final class RadarViewController: UIViewController {
         RadarViewController.isPresented = false
     }
 
-    @objc private func goBack() {
-        if web.canGoBack {
-            web.goBack()
-        } else {
-            dismiss(animated: true)
+    // ── 返回按钮（对齐 bg_float_back.xml：44dp 圆形、白色 95%、1dp #330EA5E9 描边） ──
+
+    private func setupBackButton() {
+        let tint = UIColor(red: 15 / 255, green: 23 / 255, blue: 42 / 255, alpha: 1)
+        let symbol = UIImage.SymbolConfiguration(pointSize: 19, weight: .semibold)
+        backButton.setImage(UIImage(systemName: "chevron.left", withConfiguration: symbol), for: .normal)
+        backButton.tintColor = tint
+        backButton.backgroundColor = UIColor(white: 1, alpha: 0.95)
+        backButton.layer.cornerRadius = RadarViewController.buttonSize / 2
+        backButton.layer.borderWidth = 1
+        backButton.layer.borderColor = UIColor(red: 14 / 255, green: 165 / 255, blue: 233 / 255,
+                                               alpha: 0.2).cgColor
+        backButton.layer.shadowColor = UIColor.black.cgColor
+        backButton.layer.shadowOpacity = 0.25
+        backButton.layer.shadowRadius = 8
+        backButton.layer.shadowOffset = CGSize(width: 0, height: 3)
+        backButton.translatesAutoresizingMaskIntoConstraints = false
+        backButton.addTarget(self, action: #selector(closeRadar), for: .touchUpInside)
+        view.addSubview(backButton)
+
+        let size = RadarViewController.buttonSize
+        NSLayoutConstraint.activate([
+            backButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor,
+                                                constant: 16),
+            backButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor,
+                                            constant: 16),
+            backButton.widthAnchor.constraint(equalToConstant: size),
+            backButton.heightAnchor.constraint(equalToConstant: size),
+        ])
+    }
+
+    // ── 退出 ─────────────────────────────────────────────────────────────
+
+    /// 与安卓一致：点击悬浮返回直接关闭雷达页（网页历史由左缘滑动处理）。
+    @objc private func closeRadar() {
+        dismiss(animated: true) { [weak self] in
+            self?.presentingViewController?.updateSupportedOrientations()
         }
     }
 
@@ -110,5 +139,17 @@ extension RadarViewController: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         showErrorPage()
+    }
+}
+
+private extension UIViewController {
+
+    /// 让系统重新询问 supportedInterfaceOrientations（关闭雷达后回到竖屏）。
+    func updateSupportedOrientations() {
+        if #available(iOS 16.0, *) {
+            setNeedsUpdateOfSupportedInterfaceOrientations()
+        } else {
+            UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
+        }
     }
 }
