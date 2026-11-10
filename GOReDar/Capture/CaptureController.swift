@@ -32,6 +32,8 @@ final class CaptureController: SecureWsListener {
 
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     private var silence: AVAudioPlayer?
+    private var keepAliveTimer: Timer?
+    private var observers: [NSObjectProtocol] = []
 
     private init() {
         logFormatter = DateFormatter()
@@ -300,28 +302,102 @@ final class CaptureController: SecureWsListener {
     }
 
     // ── 后台保活 ─────────────────────────────────────────────────────────
+    //
+    // iOS 没有前台服务，锁屏/切后台后进程会被挂起，SOCKS5 与 WS 随之断开。
+    // 这里用「后台音频」这个系统允许的场景维持进程存活：
+    //   1. UIBackgroundModes=audio（Info.plist）+ AVAudioSession(.playback)
+    //   2. 循环播放一段听不见的极低幅度音频，系统判定 App 正在放音 -> 不挂起
+    //   3. 定时续期 beginBackgroundTask，补上音频被打断（来电等）的窗口
+    //   4. 监听被打断/回前台/进后台，自动恢复播放
 
     private func beginKeepAlive() {
-        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "capture") { [weak self] in
-            self?.endBackgroundTaskOnly()
-        }
+        registerKeepAliveObservers()
         startSilence()
+        renewBackgroundTask()
+
+        keepAliveTimer?.invalidate()
+        keepAliveTimer = Timer.scheduledTimer(withTimeInterval: 25, repeats: true) { [weak self] _ in
+            self?.resumeSilence()
+            self?.renewBackgroundTask()
+        }
+    }
+
+    private func registerKeepAliveObservers() {
+        guard observers.isEmpty else { return }
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification,
+                                           object: AVAudioSession.sharedInstance(),
+                                           queue: .main) { [weak self] note in
+            self?.handleAudioInterruption(note)
+        })
+        observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification,
+                                           object: nil,
+                                           queue: .main) { [weak self] _ in
+            self?.resumeSilence()
+            self?.renewBackgroundTask()
+        })
+        observers.append(center.addObserver(forName: UIApplication.willEnterForegroundNotification,
+                                           object: nil,
+                                           queue: .main) { [weak self] _ in
+            self?.resumeSilence()
+        })
+    }
+
+    private func handleAudioInterruption(_ note: Notification) {
+        guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        if type == .ended {
+            // 来电/闹钟等打断结束后，系统会把音频会话置为 inactive，必须重新激活。
+            resumeSilence()
+        }
     }
 
     private func startSilence() {
+        guard silence == nil else { return }
         let session = AVAudioSession.sharedInstance()
-        _ = try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-        _ = try? session.setActive(true)
-        guard let data = CaptureController.silentWave() else { return }
-        let player = try? AVAudioPlayer(data: data)
-        player?.numberOfLoops = -1
-        player?.volume = 0
-        _ = player?.prepareToPlay()
-        _ = player?.play()
+        do {
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+        } catch {
+            pushDiag("后台保活：音频会话激活失败 \(error.localizedDescription)")
+        }
+        guard let data = CaptureController.silentWave(),
+              let player = try? AVAudioPlayer(data: data) else {
+            pushDiag("后台保活：静音音频创建失败")
+            return
+        }
+        player.numberOfLoops = -1
+        player.volume = 0
+        player.prepareToPlay()
+        player.play()
         silence = player
+        pushDiag("后台保活已开启")
+    }
+
+    /// 音频被系统打断后重新拉起；已经在播则什么都不做。
+    private func resumeSilence() {
+        guard let player = silence else { return }
+        _ = try? AVAudioSession.sharedInstance().setActive(true)
+        if !player.isPlaying {
+            _ = player.play()
+        }
+    }
+
+    private func renewBackgroundTask() {
+        endBackgroundTaskOnly()
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "capture.keepalive") { [weak self] in
+            self?.endBackgroundTaskOnly()
+        }
     }
 
     private func endKeepAlive() {
+        keepAliveTimer?.invalidate()
+        keepAliveTimer = nil
+
+        let center = NotificationCenter.default
+        observers.forEach { center.removeObserver($0) }
+        observers.removeAll()
+
         let hadPlayer = silence != nil
         silence?.stop()
         silence = nil
@@ -339,10 +415,12 @@ final class CaptureController: SecureWsListener {
         }
     }
 
-    /// 1 秒 8kHz / 8bit / 单声道静音 WAV，循环播放用于维持后台音频会话。
+    /// 1 秒 44.1kHz / 16bit / 单声道 WAV，采样值取最小幅度（1/32767），
+    /// 人耳听不到，但系统会认为「正在播放音频」，从而保持后台运行。
     private static func silentWave() -> Data? {
-        let sampleRate: UInt32 = 8000
-        let dataSize: UInt32 = sampleRate
+        let sampleRate: UInt32 = 44100
+        let frames: UInt32 = sampleRate        // 1 秒
+        let dataSize = frames * 2              // 16bit 单声道
         var bytes: [UInt8] = []
         bytes.reserveCapacity(Int(44 + dataSize))
 
@@ -366,12 +444,19 @@ final class CaptureController: SecureWsListener {
         appendU16(1)               // PCM
         appendU16(1)               // 单声道
         appendU32(sampleRate)
-        appendU32(sampleRate)      // byteRate = sampleRate * 1ch * 1B
-        appendU16(1)               // blockAlign
-        appendU16(8)               // 8 bit
+        appendU32(sampleRate * 2)  // byteRate = sampleRate * 1ch * 2B
+        appendU16(2)               // blockAlign
+        appendU16(16)              // 16 bit
         bytes.append(contentsOf: Array("data".utf8))
         appendU32(dataSize)
-        bytes.append(contentsOf: [UInt8](repeating: 0x80, count: Int(dataSize)))
+
+        // 最小幅度方波：避免全 0 被某些路径判定为静音丢帧。
+        var sample: UInt16 = 1
+        for _ in 0..<frames {
+            let value: UInt16 = sample == 1 ? 1 : 0xFFFF
+            appendU16(value)
+            sample = sample == 1 ? 0 : 1
+        }
         return Data(bytes)
     }
 }
