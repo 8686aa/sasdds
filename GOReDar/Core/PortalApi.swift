@@ -24,12 +24,21 @@ enum PortalApi {
 
     private static func send(_ request: URLRequest,
                              timeout: TimeInterval,
-                             completion: @escaping (Int, Data?) -> Void) {
-        let task = session(timeout).dataTask(with: request) { data, response, _ in
+                             completion: @escaping (Int, Data?, String) -> Void) {
+        let task = session(timeout).dataTask(with: request) { data, response, error in
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            completion(code, data)
+            // code == 0 表示连 HTTP 响应都没拿到（连不上 / 超时 / 被系统拒绝），
+            // 只有 0 分不出是哪一种，把系统给的描述一起带出去。
+            completion(code, data, error?.localizedDescription ?? "")
         }
         task.resume()
+    }
+
+    /// code == 0 时的提示：把系统错误附上，否则只剩一个无信息量的 0。
+    private static func connectHint(_ host: String, _ code: Int,
+                                    _ detail: String, _ fallback: String) -> String {
+        guard code == 0, !detail.isEmpty else { return fallback }
+        return "无法连接 \(host):666 · \(detail)"
     }
 
     /// 启动检查：公告 / 最新版本 / 全局开关。
@@ -39,7 +48,7 @@ enum PortalApi {
             completion("")
             return
         }
-        send(URLRequest(url: url), timeout: 6) { _, data in
+        send(URLRequest(url: url), timeout: 6) { _, data, _ in
             completion(data.flatMap { String(data: $0, encoding: .utf8) } ?? "")
         }
     }
@@ -56,14 +65,16 @@ enum PortalApi {
         request.httpMethod = "POST"
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["key": key], options: [])
-        send(request, timeout: 8) { code, data in
+        send(request, timeout: 8) { code, data, detail in
             let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
             let json = (try? JSONSerialization.jsonObject(with: Data(body.utf8))) as? [String: Any] ?? [:]
             if (200...299).contains(code), json["ok"] as? Bool == true {
                 let user = (json["user"] as? [String: Any])?["username"] as? String ?? ""
                 completion(true, user, body)
             } else {
-                let message = json["error"] as? String ?? "登录失败 (\(code))"
+                // 服务端给了 error 就用它；拿不到响应时用系统错误说明原因。
+                let message = json["error"] as? String
+                    ?? Self.connectHint(host, code, detail, "登录失败 (\(code))")
                 completion(false, message, body)
             }
         }
@@ -79,14 +90,15 @@ enum PortalApi {
             completion("", error)
             return
         }
-        send(URLRequest(url: url), timeout: 6) { _, data in
+        send(URLRequest(url: url), timeout: 6) { code, data, detail in
             let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
             let json = (try? JSONSerialization.jsonObject(with: Data(body.utf8))) as? [String: Any] ?? [:]
             if let shared = json["url"] as? String, !shared.isEmpty {
                 completion(shared, "")
                 return
             }
-            error = json["error"] as? String ?? error
+            error = json["error"] as? String
+                ?? Self.connectHint(host, code, detail, error)
             completion("", error)
         }
     }
@@ -104,7 +116,7 @@ enum PortalApi {
         request.httpMethod = "POST"
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.httpBody = payload
-        send(request, timeout: 8) { code, data in
+        send(request, timeout: 8) { code, data, detail in
             let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
             let json = (try? JSONSerialization.jsonObject(with: Data(body.utf8))) as? [String: Any] ?? [:]
             if (200...299).contains(code), json["ok"] as? Bool == true {
@@ -112,7 +124,9 @@ enum PortalApi {
                 let size = json["size"] as? Int ?? payload.count
                 completion(true, Self.sizeText(logs: logs, size: size), logs)
             } else {
-                completion(false, json["error"] as? String ?? "上报失败 (\(code))", 0)
+                let message = json["error"] as? String
+                    ?? Self.connectHint(host, code, detail, "上报失败 (\(code))")
+                completion(false, message, 0)
             }
         }
     }
