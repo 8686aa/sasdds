@@ -13,7 +13,7 @@ final class NativeBridge {
     (function () {
       function call(method, args) {
         try {
-          var reply = prompt('\(promptPrefix)' + JSON.stringify({ m: method, a: args || [] }));
+          var reply = prompt('\(NativeBridge.promptPrefix)' + JSON.stringify({ m: method, a: args || [] }));
           return reply === null || reply === undefined ? '' : String(reply);
         } catch (e) {
           return '';
