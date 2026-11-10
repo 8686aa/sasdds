@@ -108,7 +108,7 @@ final class NativeBridge {
     private func configJson() -> String {
         let node = SecureStore.get(nodeKey)
         let key = SecureStore.get(apiKeyKey)
-        let port = Int(SecureStore.get(portKey)) ?? 1080
+        let port = Int(SecureStore.get(portKey)) ?? 1010
         let info = Bundle.main.infoDictionary ?? [:]
         let payload: [String: Any] = [
             "node": node,

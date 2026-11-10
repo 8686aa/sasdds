@@ -359,7 +359,7 @@ body.locked .gate{display:block}
   </div>
   <div class="field">
     <label>本地端口</label>
-    <input id="inPort" type="number" inputmode="numeric" placeholder="1080">
+    <input id="inPort" type="number" inputmode="numeric" placeholder="1010">
   </div>
   <button class="mini" onclick="saveConfig()">保存端口</button>
   <button class="mini" onclick="logout()" style="margin-top:8px;background:#fff;border:1px solid var(--line);color:#B91C1C">退出登录 / 切换节点</button>
@@ -390,7 +390,7 @@ body.locked .gate{display:block}
 <script>
 const N = window.native || {
   state: () => '{"running":false}',
-  config: () => '{"node":"","port":1080,"hasKey":false,"version":"1.1","versionCode":0,"user":"","ip":""}',
+  config: () => '{"node":"","port":1010,"hasKey":false,"version":"1.1","versionCode":0,"user":"","ip":""}',
   save: () => {}, startCapture: () => "原生桥未连接",
   stopCapture: () => {}, copyText: () => {}, qr: () => "",
   openRadar: () => {}, shareRadar: () => { setTimeout(() => window.onShare('', '原生桥未连接'), 0); },
@@ -402,7 +402,7 @@ const N = window.native || {
   reportLogs: () => { setTimeout(() => window.onReport(false, "原生桥未连接"), 0); }
 };
 
-let cfg = { node:"", port:1080, hasKey:false, ip:"", user:"", version:"1.1", versionCode:0 };
+let cfg = { node:"", port:1010, hasKey:false, ip:"", user:"", version:"1.1", versionCode:0 };
 let st  = { running:false, logs:[] };
 let lastLogs = "";
 let schemeIdx = 0;
@@ -422,7 +422,7 @@ function redact(s){
 }
 function link(){
   const ip = cfg.ip || "192.168.1.100";
-  const port = cfg.port || 1080;
+  const port = cfg.port || 1010;
   return "socks5://" + ip + ":" + port + "#GOReDar";
 }
 function toast(msg){
@@ -463,7 +463,7 @@ window.onState = function(s){
 
 function renderAddr(){
   document.getElementById("addr").textContent = cfg.ip
-    ? (cfg.ip + ":" + (cfg.port || 1080))
+    ? (cfg.ip + ":" + (cfg.port || 1010))
     : "未获取到局域网 IP";
 }
 
@@ -505,7 +505,7 @@ function boot(){
   if (cfg.node) refreshInfo(cfg.node);
   if (cfg.node && cfg.hasKey){
     gateHint("正在自动登录…");
-    try { N.appLogin(cfg.node, "", cfg.port || 1080); }
+    try { N.appLogin(cfg.node, "", cfg.port || 1010); }
     catch (e) { finishLogin(false, "原生桥未连接"); }
   } else {
     gateHint("首次使用请填写接入节点与接入 Key");
@@ -590,7 +590,7 @@ function doLogin(){
   btn.textContent = "登录中…";
   gateHint("正在验证接入信息…");
   if (node !== cfg.node) refreshInfo(node);
-  try { N.appLogin(node, key, cfg.port || 1080); }
+  try { N.appLogin(node, key, cfg.port || 1010); }
   catch (e) { finishLogin(false, "原生桥未连接"); }
 }
 
@@ -644,7 +644,7 @@ function loadConfig(){
   try { cfg = Object.assign(cfg, JSON.parse(N.config())); } catch (e) {}
   document.getElementById("curUser").value = cfg.user || "";
   document.getElementById("curNode").value = cfg.node || "";
-  document.getElementById("inPort").value = cfg.port || 1080;
+  document.getElementById("inPort").value = cfg.port || 1010;
   renderAddr();
 }
 window.onResume = function(){
@@ -669,7 +669,7 @@ function startOrStop(){
     toast("请先登录接入账号");
     return;
   }
-  const err = N.startCapture(cfg.node, cfg.port || 1080);
+  const err = N.startCapture(cfg.node, cfg.port || 1010);
   if (err){ toast(err); return; }
   toast("正在启动…");
 }
@@ -739,7 +739,7 @@ const PLATFORMS = [
 function schemes(p){
   const L = link();
   const ip = cfg.ip || "192.168.1.100";
-  const port = cfg.port || 1080;
+  const port = cfg.port || 1010;
   const singbox = JSON.stringify({
     log:{level:"warn"},
     inbounds:[{type:"tun", tag:"tun-in", address:["172.19.0.1/30"], mtu:9000,
