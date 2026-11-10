@@ -252,7 +252,8 @@ final class NativeBridge {
             return
         }
         PortalApi.report(node: node, key: key, payload: body) { [weak self] ok, message, _ in
-            self?.host?.evaluate("window.onReport(\(ok ? "true" : "false"), \(jsLiteral(message)))")
+            guard let self = self else { return }
+            self.host?.evaluate("window.onReport(\(ok ? "true" : "false"), \(self.jsLiteral(message)))")
         }
     }
 
