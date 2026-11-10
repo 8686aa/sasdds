@@ -1,0 +1,66 @@
+name: Build unsigned IPA
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Archive without code signing
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project GOReDar.xcodeproj \
+            -scheme GOReDar \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/GOReDar.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            archive
+
+      - name: Package Payload into unsigned IPA
+        run: |
+          set -euo pipefail
+          APP="build/GOReDar.xcarchive/Products/Applications/GOReDar.app"
+          test -d "$APP"
+          rm -rf build/Payload build/GOReDar-unsigned.ipa
+          mkdir -p build/Payload
+          cp -R "$APP" build/Payload/
+          cd build
+          zip -qry GOReDar-unsigned.ipa Payload
+          ls -lh GOReDar-unsigned.ipa
+          shasum -a 256 GOReDar-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: GOReDar-unsigned-ipa
+          path: build/GOReDar-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30

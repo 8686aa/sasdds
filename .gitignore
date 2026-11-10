@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.xcarchive
+*.ipa
+*.xcuserstate
+xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# XcodeGen 产物（由 CI / 本地 xcodegen generate 生成）
+GOReDar.xcodeproj/
+
+# 本地证书与描述文件
+*.mobileprovision
+*.p12
