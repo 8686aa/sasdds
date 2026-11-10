@@ -44,9 +44,13 @@
 	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
+		<!-- 只保留这一个键。
+		     iOS 10+ 里 NSAllowsArbitraryLoads 与 NSAllowsLocalNetworking /
+		     NSAllowsArbitraryLoadsInWebContent / NSAllowsArbitraryLoadsForMedia
+		     同时出现时，NSAllowsArbitraryLoads 会被系统忽略，只剩后者生效；
+		     而 NSAllowsLocalNetworking 只覆盖 .local 与不带点的主机名，不覆盖
+		     公网 IP 的明文 HTTP —— 表现就是连接节点时报 ATS 错误。 -->
 		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
