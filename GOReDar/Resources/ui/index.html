@@ -741,13 +741,19 @@ function schemes(p){
   const ip = cfg.ip || "192.168.1.100";
   const port = cfg.port || 1080;
   const singbox = JSON.stringify({
-    log:{level:"info"},
+    log:{level:"warn"},
+    inbounds:[{type:"tun", tag:"tun-in", address:["172.19.0.1/30"], mtu:9000,
+               auto_route:true, strict_route:false, stack:"mixed"}],
     outbounds:[
       {type:"socks", tag:"goredar", server:ip, server_port:port, version:"5"},
       {type:"direct", tag:"direct"}
     ],
     route:{final:"goredar"}
   }, null, 2);
+  // sing-box 只认 import-remote-profile 链接；url 指向本机 1083 端口的配置服务，
+  // 直接扫 JSON 或 socks5:// 它都不会识别。
+  const singboxLink = "sing-box://import-remote-profile?url=" +
+    encodeURIComponent("http://" + ip + ":1083/singbox.json") + "#GOReDar";
   const clash = [
     "proxies:",
     "  - name: GOReDar",
@@ -773,14 +779,15 @@ function schemes(p){
         "首次连接会提示添加 VPN 配置，允许即可。"
       ],
       note:"二维码内容为 " + L + "，也可直接复制链接在 Shadowrocket 内打开。" },
-    { name:"sing-box", tag:"", qr:true, cfg:singbox,
-      desc:"扫码或粘贴 JSON 配置，走 sing-box 的 VPN 内核。",
+    { name:"sing-box", tag:"", qr:true, qrData:singboxLink, cfg:singbox,
+      desc:"扫码直接导入 sing-box，走它的 VPN 内核接管整机流量。",
       steps:[
-        "扫下方二维码即可带上接入信息；也可把 JSON 完整粘贴到配置文件里。",
-        "保存并启用该配置，启动后在系统 VPN 中出现 sing-box。",
-        "回到游戏前确认 sing-box 处于已连接状态。"
+        "在 sing-box 里点「配置 → 新建 → 扫码」，扫下方二维码。",
+        "二维码是 sing-box://import-remote-profile 链接，会自动拉取本机配置并保存为本地配置。",
+        "启用该配置并启动，系统 VPN 里会出现 sing-box。",
+        "改过端口后请重新扫码，旧的配置地址会失效。"
       ],
-      note:"端口、服务器地址已按当前接入信息生成，改了端口请重新复制。" },
+      note:"配置地址 http://" + ip + ":1083/singbox.json，需与本机在同一局域网。" },
     { name:"原生 VPN", tag:"", qr:true, cfg:null,
       desc:"直接用 iPhone 自带的「设置 → VPN」开关，不必打开任何第三方界面。",
       steps:[
@@ -802,6 +809,14 @@ function schemes(p){
         "保持 NekoBox 的连接图标常驻即可。"
       ],
       note:"二维码内容为 " + L + "。" },
+    { name:"sing-box", tag:"", qr:true, qrData:singboxLink, cfg:singbox,
+      desc:"sing-box for Android（SFA），扫码直接导入配置。",
+      steps:[
+        "打开 SFA → 配置 → 右上角「+」→ 扫码导入。",
+        "扫下方二维码，会自动下载本机配置并保存为本地配置。",
+        "选中该配置点右下角启动，首次请求 VPN 权限时允许。"
+      ],
+      note:"配置地址 http://" + ip + ":1083/singbox.json，需与本机在同一局域网。" },
     { name:"Clash 系", tag:"", qr:true, cfg:clash,
       desc:"Clash Meta / Clash 内核通用 YAML，可扫码也可粘贴。",
       steps:[
@@ -899,7 +914,10 @@ function renderSheet(){
     html += '<pre class="cfg">' + esc(item.cfg) + '</pre>';
   }
   html += '<div class="copys">';
-  html += '<button onclick="copy(\'' + link().replace(/'/g, "") + '\',\'已复制接入链接\')">复制接入链接</button>';
+  const copyText = item.qrData || link();
+  html += '<button onclick="copy(\'' + copyText.replace(/'/g, "") + '\',\'' +
+          (item.qrData ? '已复制 sing-box 链接' : '已复制接入链接') + '\')">' +
+          (item.qrData ? '复制 sing-box 链接' : '复制接入链接') + '</button>';
   if (item.cfg) html += '<button onclick="copyCfg()">复制配置</button>';
   html += '</div>';
   if (item.note) html += '<div class="note">' + esc(item.note) + '</div>';
@@ -908,7 +926,7 @@ function renderSheet(){
 
   if (item.qr){
     const img = document.getElementById("sheetQr");
-    const data = N.qr(link());
+    const data = N.qr(item.qrData || link());
     if (data) img.src = data;
     else img.replaceWith(Object.assign(document.createElement("div"),
       { className:"hint", textContent:"二维码生成失败，请手动填写地址与端口" }));

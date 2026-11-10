@@ -22,6 +22,7 @@ final class CaptureController: SecureWsListener {
     private var ws: SecureWsClient?
     private var relay: CaptureRelay?
     private var server: Socks5Server?
+    private var configServer: ConfigHttpServer?
     private var stopping = true
 
     private var nodeText = ""
@@ -150,10 +151,40 @@ final class CaptureController: SecureWsListener {
         lock.unlock()
         if !ip.isEmpty {
             pushLog("设备接入地址：\(ip):\(port)")
+            startConfigServer(ip: ip, port: port)
         }
 
         beginKeepAlive()
         return ""
+    }
+
+    // ── sing-box 配置服务 ────────────────────────────────────────────────
+    //
+    // sing-box 只认 `sing-box://import-remote-profile?url=`，必须有一个能真正下载
+    // 到 JSON 的地址，所以本地起个只读 HTTP，把当前 SOCKS5 地址吐成 sing-box 配置。
+
+    private func startConfigServer(ip: String, port: UInt16) {
+        let server = ConfigHttpServer { CaptureController.singboxJson(ip: ip, port: port) }
+        if server.start() {
+            configServer = server
+            pushLog("sing-box 配置：http://\(ip):\(ConfigHttpServer.port)/singbox.json")
+        } else {
+            pushLog("sing-box 配置服务启动失败（端口 \(ConfigHttpServer.port) 被占用）")
+        }
+    }
+
+    private static func singboxJson(ip: String, port: UInt16) -> String {
+        """
+        {
+          "log": {"level": "warn"},
+          "inbounds": [{"type": "tun", "tag": "tun-in", "address": ["172.19.0.1/30"], "mtu": 9000, "auto_route": true, "strict_route": false, "stack": "mixed"}],
+          "outbounds": [
+            {"type": "socks", "tag": "goredar", "server": "\(ip)", "server_port": \(port), "version": "5"},
+            {"type": "direct", "tag": "direct"}
+          ],
+          "route": {"final": "goredar"}
+        }
+        """
     }
 
     /// 允许重复调用。
@@ -161,14 +192,17 @@ final class CaptureController: SecureWsListener {
         lock.lock()
         let server = self.server
         let client = self.ws
+        let config = self.configServer
         self.server = nil
         self.ws = nil
         self.relay = nil
+        self.configServer = nil
         stopping = true
         wsState = "未连接"
         listenAddressValue = ""
         lock.unlock()
 
+        config?.stop()
         server?.stop()
         client?.stop()
         endKeepAlive()
